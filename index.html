@@ -1,0 +1,385 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ultimate Car Driving Game</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#101820;color:white;
+ font-family:Arial,sans-serif;overflow:hidden;
+}
+#game{
+ width:100vw;height:100dvh;display:block;
+ background:#65a85a;
+}
+.hud{
+ position:absolute;top:12px;left:12px;right:12px;
+ display:flex;justify-content:space-between;
+ pointer-events:none;gap:8px;
+}
+.panel{
+ background:#101820dd;padding:12px 16px;
+ border-radius:12px;font-weight:bold;
+ box-shadow:0 3px 10px #0005;
+}
+#message{
+ position:absolute;top:40%;left:50%;
+ transform:translate(-50%,-50%);
+ background:#101820ee;padding:25px;
+ border-radius:18px;text-align:center;
+ width:min(85%,350px);
+}
+button{
+ border:0;border-radius:12px;padding:13px 20px;
+ background:#ffca28;color:#111;font-weight:bold;
+ font-size:16px;cursor:pointer;
+}
+.controls{
+ position:absolute;bottom:20px;left:0;right:0;
+ display:flex;justify-content:space-between;
+ padding:0 20px;pointer-events:none;
+}
+.group{display:flex;gap:12px}
+.controls button{
+ width:65px;height:60px;font-size:23px;
+ background:#101820cc;color:white;
+ border:2px solid #ffffff55;
+ pointer-events:auto;touch-action:none;
+}
+#nitro{background:#00bcd4;color:#001}
+.small{
+ position:absolute;bottom:95px;left:50%;
+ transform:translateX(-50%);
+ color:white;background:#101820aa;
+ padding:7px 12px;border-radius:9px;
+ font-size:12px;white-space:nowrap;
+}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div class="hud">
+ <div class="panel">🏎️ ULTIMATE RACE</div>
+ <div class="panel">SCORE: <span id="score">0</span></div>
+ <div class="panel">SPEED: <span id="speed">0</span></div>
+</div>
+
+<div id="message">
+ <h2>🏁 CAR RACING</h2>
+ <p>अपनी कार चलाओ और रास्ते के ऑब्स्टेकल्स से बचो!</p>
+ <button onclick="startGame()">START GAME</button>
+</div>
+
+<div class="small">PC: ← → / A D | SPACE: BRAKE | SHIFT: NITRO</div>
+
+<div class="controls">
+ <div class="group">
+  <button id="left">◀</button>
+  <button id="right">▶</button>
+ </div>
+ <div class="group">
+  <button id="brake">▼</button>
+  <button id="nitro">⚡</button>
+  <button id="gas">▲</button>
+ </div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+let W,H;
+function resize(){
+ W=canvas.width=innerWidth;
+ H=canvas.height=innerHeight;
+}
+addEventListener("resize",resize);
+resize();
+
+let running=false;
+let score=0;
+let speed=0;
+let roadOffset=0;
+let obstacles=[];
+let traffic=[];
+let spawnTimer=0;
+
+const player={
+ x:0,
+ y:0,
+ width:42,
+ height:75,
+ color:"#ffca28"
+};
+
+const keys={left:false,right:false,gas:false,
+ brake:false,nitro:false};
+
+function buttonControl(id,key){
+ const el=document.getElementById(id);
+ el.addEventListener("pointerdown",e=>{
+  e.preventDefault();keys[key]=true;
+ });
+ ["pointerup","pointerleave","pointercancel"].forEach(ev=>{
+  el.addEventListener(ev,()=>keys[key]=false);
+ });
+}
+buttonControl("left","left");
+buttonControl("right","right");
+buttonControl("gas","gas");
+buttonControl("brake","brake");
+buttonControl("nitro","nitro");
+
+addEventListener("keydown",e=>{
+ if(e.key==="ArrowLeft"||e.key==="a")keys.left=true;
+ if(e.key==="ArrowRight"||e.key==="d")keys.right=true;
+ if(e.key==="ArrowUp"||e.key==="w")keys.gas=true;
+ if(e.key==="ArrowDown"||e.key===" ")keys.brake=true;
+ if(e.key==="Shift")keys.nitro=true;
+});
+addEventListener("keyup",e=>{
+ if(e.key==="ArrowLeft"||e.key==="a")keys.left=false;
+ if(e.key==="ArrowRight"||e.key==="d")keys.right=false;
+ if(e.key==="ArrowUp"||e.key==="w")keys.gas=false;
+ if(e.key==="ArrowDown"||e.key===" ")keys.brake=false;
+ if(e.key==="Shift")keys.nitro=false;
+});
+
+function roadWidth(y){
+ return W*(0.42+0.28*y/H);
+}
+function roadCenter(y){
+ return W/2+Math.sin(roadOffset/700)*W*.09;
+}
+
+function drawRoad(){
+ // Grass
+ ctx.fillStyle="#559d48";
+ ctx.fillRect(0,0,W,H);
+
+ // Grass decoration
+ for(let i=0;i<35;i++){
+  let y=(i*100+roadOffset*.6)%(H+100)-50;
+  ctx.fillStyle="#72b85b";
+  ctx.fillRect(10+(i*83)%W,y,22,4);
+ }
+
+ // Road
+ ctx.beginPath();
+ ctx.moveTo(W/2-W*.13,0);
+ ctx.lineTo(W/2+W*.13,0);
+ ctx.lineTo(W*.93,H);
+ ctx.lineTo(W*.07,H);
+ ctx.closePath();
+ ctx.fillStyle="#343a40";
+ ctx.fill();
+
+ // Road borders
+ ctx.strokeStyle="white";
+ ctx.lineWidth=5;
+ ctx.beginPath();
+ ctx.moveTo(W/2-W*.13,0);
+ ctx.lineTo(W*.07,H);
+ ctx.moveTo(W/2+W*.13,0);
+ ctx.lineTo(W*.93,H);
+ ctx.stroke();
+
+ // Road markings
+ for(let i=0;i<16;i++){
+  let y=(i*100+roadOffset)%(H+100)-50;
+  let t=y/H;
+  let x=roadCenter(y);
+  let rw=roadWidth(y);
+  ctx.fillStyle="#fff";
+  ctx.fillRect(x-rw/6,y,5+10*t,35+25*t);
+  ctx.fillRect(x+rw/6,y,5+10*t,35+25*t);
+ }
+}
+
+function drawCar(x,y,w,h,color){
+ // Shadow
+ ctx.fillStyle="#0005";
+ ctx.beginPath();
+ ctx.ellipse(x+w/2,y+h-2,w*.7,8,0,0,Math.PI*2);
+ ctx.fill();
+
+ // Wheels
+ ctx.fillStyle="#151515";
+ ctx.fillRect(x-5,y+12,9,h*.25);
+ ctx.fillRect(x+w-4,y+12,9,h*.25);
+ ctx.fillRect(x-5,y+h*.65,9,h*.25);
+ ctx.fillRect(x+w-4,y+h*.65,9,h*.25);
+
+ // Car body
+ ctx.fillStyle=color;
+ ctx.beginPath();
+ ctx.roundRect(x,y,w,h,10);
+ ctx.fill();
+
+ // Windows
+ ctx.fillStyle="#152b3d";
+ ctx.beginPath();
+ ctx.roundRect(x+6,y+13,w-12,h*.26,6);
+ ctx.fill();
+ ctx.fillRect(x+6,y+h*.54,w-12,h*.19);
+
+ // Lights
+ ctx.fillStyle="#fff5c4";
+ ctx.fillRect(x+5,y+3,9,5);
+ ctx.fillRect(x+w-14,y+3,9,5);
+ ctx.fillStyle="#ff3333";
+ ctx.fillRect(x+5,y+h-8,9,5);
+ ctx.fillRect(x+w-14,y+h-8,9,5);
+}
+
+function drawCone(x,y,size){
+ ctx.fillStyle="#222";
+ ctx.fillRect(x-size*.5,y+size*.7,size,size*.18);
+ ctx.fillStyle="#ff791b";
+ ctx.beginPath();
+ ctx.moveTo(x,y);
+ ctx.lineTo(x-size*.45,y+size*.7);
+ ctx.lineTo(x+size*.45,y+size*.7);
+ ctx.closePath();
+ ctx.fill();
+ ctx.fillStyle="white";
+ ctx.fillRect(x-size*.25,y+size*.48,size*.5,size*.1);
+}
+
+function spawnObstacle(){
+ let y=-70;
+ let t=.15;
+ let center=roadCenter(y);
+ let rw=roadWidth(y);
+ let lane=Math.random()<.5?-.25:.25;
+ obstacles.push({
+  x:center+rw*lane,
+  y:y,
+  size:20,
+  type:Math.random()<.5?"cone":"barrier"
+ });
+}
+
+function spawnTraffic(){
+ let y=-110;
+ let t=.15;
+ let center=roadCenter(y);
+ let rw=roadWidth(y);
+ let lane=[-.32,0,.32][Math.floor(Math.random()*3)];
+ traffic.push({
+  x:center+rw*lane-20,
+  y:y,
+  color:["#2196f3","#e53935","#f5f5f5","#9c27b0"][Math.floor(Math.random()*4)]
+ });
+}
+
+function drawObstacle(o){
+ if(o.type==="cone")drawCone(o.x,o.y,o.size);
+ else{
+  ctx.fillStyle="#f44336";
+  ctx.fillRect(o.x-20,o.y,40,15);
+  ctx.fillStyle="white";
+  ctx.fillRect(o.x-15,o.y+2,7,11);
+  ctx.fillRect(o.x+5,o.y+2,7,11);
+ }
+}
+
+function startGame(){
+ score=0;speed=0;roadOffset=0;
+ obstacles=[];traffic=[];
+ player.x=W/2-21;
+ player.y=H-125;
+ running=true;
+ document.getElementById("message").style.display="none";
+}
+
+function gameOver(){
+ running=false;
+ document.getElementById("message").innerHTML=
+ `<h2>🏁 GAME OVER</h2>
+ <h3>Your Score: ${Math.floor(score)}</h3>
+ <button onclick="startGame()">PLAY AGAIN</button>`;
+ document.getElementById("message").style.display="block";
+}
+
+function update(){
+ if(!running)return;
+
+ if(keys.gas)speed+=.12;
+ else speed-=.035;
+
+ if(keys.nitro)speed+=.2;
+ if(keys.brake)speed-=.25;
+
+ speed=Math.max(0,Math.min(speed,12));
+ let movement=speed/5+1;
+
+ if(keys.left)player.x-=6+speed*.3;
+ if(keys.right)player.x+=6+speed*.3;
+
+ player.x=Math.max(W*.06,Math.min(W*.94-player.width,player.x));
+
+ roadOffset+=movement*3;
+ score+=speed*.035;
+
+ spawnTimer++;
+ if(spawnTimer>Math.max(24,75-speed*4)){
+  spawnObstacle();
+  if(Math.random()<.65)spawnTraffic();
+  spawnTimer=0;
+ }
+
+ obstacles.forEach(o=>o.y+=movement*2.2);
+ traffic.forEach(t=>t.y+=movement*1.7);
+
+ obstacles=obstacles.filter(o=>o.y<H+50);
+ traffic=traffic.filter(t=>t.y<H+120);
+
+ // Obstacle collision
+ for(let o of obstacles){
+  if(Math.abs(o.x-player.x-player.width/2)<30 &&
+     Math.abs(o.y-player.y-player.height/2)<40){
+   gameOver();
+  }
+ }
+
+ // Traffic car collision
+ for(let t of traffic){
+  if(Math.abs(t.x-player.x)<36 &&
+     Math.abs(t.y-player.y)<65){
+   gameOver();
+  }
+ }
+
+ document.getElementById("score").textContent=Math.floor(score);
+ document.getElementById("speed").textContent=Math.floor(speed*12)+" km/h";
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ drawRoad();
+
+ obstacles.forEach(drawObstacle);
+ traffic.forEach(t=>drawCar(t.x,t.y,40,70,t.color));
+
+ drawCar(player.x,player.y,player.width,player.height,player.color);
+}
+
+function loop(){
+ update();
+ draw();
+ requestAnimationFrame(loop);
+}
+
+player.x=W/2-21;
+player.y=H-125;
+loop();
+</script>
+</body>
+</html>
+
